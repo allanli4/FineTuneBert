@@ -23,8 +23,7 @@ class myBert():
         self.test_dataloader = test_dataloader
         self.num_labels= len(train_dataloader.dataset[0][2])
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model=BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=self.num_labels)
-        self.model.to(torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+        self.model=None
 
         self.train_history=None
         self.val_history=None
@@ -52,7 +51,9 @@ class myBert():
         avg_acc = total_accuracy / len(dataloader)
         return avg_loss, avg_acc
     
-    def train(self,epochs=20, lr=2e-5, freeze=0,early_stopping=5,decay=1):
+    def train(self,epochs=20, lr=2e-5, freeze=0,early_stopping=5,decay=1,restore_best_weights=True):
+        self.model=BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=self.num_labels)
+        self.model.to(torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
         if freeze > 13:
             raise ValueError("freeze should be less or equal than 12")
         
@@ -71,6 +72,7 @@ class myBert():
         min_val_loss = np.inf
         patience_counter = 0
         start_time = time.time()
+        best_model = None
         for epoch in range(epochs):
             self.model.train()
             total_loss, total_accuracy = 0, 0
@@ -95,12 +97,13 @@ class myBert():
 
             val_loss, val_accuracy = self.validate(self.validation_dataloader, loss_fn, self.device)
             print(f"Epoch {epoch + 1}/{epochs} - train Loss: {avg_train_loss:.4f} train Acc: {avg_train_acc:.4f}"
-                  " Valid Loss: {val_loss:.4f} Valid Acc: {val_accuracy:.4f}")
+                  f" Valid Loss: {val_loss:.4f} Valid Acc: {val_accuracy:.4f}")
             val_history['loss'].append(val_loss)
             val_history['acc'].append(val_accuracy)
             #early stopping
             if val_loss < min_val_loss:
                 min_val_loss = val_loss
+                best_model = self.model.state_dict()
             else:
                 patience_counter += 1
                 if patience_counter > early_stopping:
@@ -108,6 +111,8 @@ class myBert():
         train_time=time.time()-start_time
         train_history['time']=train_time
         print(f"Training time: {train_time//60} minutes {train_time%60:.2f} seconds")
+        if restore_best_weights:
+            self.model.load_state_dict(best_model)
 
         test_results={'loss':[], 'acc':[]}
         test_loss, test_accuracy = self.validate(self.test_dataloader, loss_fn, self.device)
@@ -130,10 +135,13 @@ class myBert():
         with open(file_name,  mode='a', newline='') as f:
             csv_writer = csv.writer(f)
             if f.tell() == 0:
-                csv_writer.writerow(['lr','freeze','decay rate','train time','best train loss','best train acc','best val loss','best val acc','test loss','test acc'])
-            csv_writer.writerow([self.hyperparameters['lr'],
+                csv_writer.writerow(['epoch','lr','early stop','freeze','decay rate','train time','best train loss','best train acc','best val loss','best val acc','test loss','test acc'])
+            csv_writer.writerow([self.hyperparameters['epochs'],
+                                self.hyperparameters['lr'],
+                                self.hyperparameters['early_stopping'],
                                 self.hyperparameters['freeze'],
                                 self.hyperparameters['decay_rate'],
+                                self.train_history['time'],
                                 min(self.train_history['loss']),
                                 max(self.train_history['acc']),
                                 min(self.val_history['loss']),
@@ -146,7 +154,7 @@ class myBert():
 
 
     def plt(self,save_path=None,save=False):
-        plt.figure(figsize=(15, 6))
+        plt.figure(figsize=(12, 4),dpi=200)
         plt.subplot(1, 2, 1)
         plt.plot(self.train_history['loss'], label='train_loss')
         plt.plot(self.val_history['loss'], label='val_loss')
@@ -165,7 +173,8 @@ class myBert():
         learning_rate = self.hyperparameters['lr']
         freeze = self.hyperparameters['freeze']
         decay = self.hyperparameters['decay_rate']
-        file_name=f'bert_lr-{learning_rate}_frz-:{freeze}_dr-{decay}.png'
+        early_stopping = self.hyperparameters['early_stopping']
+        file_name=f'bert_lr-{learning_rate}_frz-{freeze}_dr-{decay}_es-{early_stopping}.png'
         if save_path:
             file_name=os.path.join(save_path,file_name)
         if save:
