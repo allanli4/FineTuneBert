@@ -50,6 +50,18 @@ class myBert():
         avg_loss = total_loss / len(dataloader)
         avg_acc = total_accuracy / len(dataloader)
         return avg_loss, avg_acc
+    def f1_score(self,preds, labels, threshold=0.5):
+        preds = torch.sigmoid(preds)
+        preds = (preds > threshold).float()
+        tp = (preds * labels).sum().to(torch.float32)
+        tn = ((1 - preds) * (1 - labels)).sum().to(torch.float32)
+        fp = (preds * (1 - labels)).sum().to(torch.float32)
+        fn = ((1 - preds) * labels).sum().to(torch.float32)
+        epsilon = 1e-7
+        precision = tp / (tp + fp + epsilon)
+        recall = tp / (tp + fn + epsilon)
+        f1 = 2* (precision*recall) / (precision + recall + epsilon)
+        return f1
     
     def train(self,epochs=20, lr=2e-5, freeze=0,early_stopping=5,decay=1,restore_best_weights=True):
         self.model=BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=self.num_labels)
@@ -107,6 +119,7 @@ class myBert():
             else:
                 patience_counter += 1
                 if patience_counter > early_stopping:
+                    self.hyperparameters['epochs']=epoch+1
                     break
         train_time=time.time()-start_time
         train_history['time']=train_time
@@ -153,8 +166,8 @@ class myBert():
         print("results saved")
 
 
-    def plt(self,save_path=None,save=False):
-        plt.figure(figsize=(12, 4),dpi=200)
+    def plt(self,save_path=None,save=False,show=True):
+        plt.figure(figsize=(12, 4),dpi=150)
         plt.subplot(1, 2, 1)
         plt.plot(self.train_history['loss'], label='train_loss')
         plt.plot(self.val_history['loss'], label='val_loss')
@@ -179,5 +192,6 @@ class myBert():
             file_name=os.path.join(save_path,file_name)
         if save:
             plt.savefig(file_name,bbox_inches='tight')
-        plt.show()
+        if show:
+            plt.show()
         
