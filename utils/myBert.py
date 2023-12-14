@@ -127,11 +127,14 @@ class myBert():
         if restore_best_weights:
             self.model.load_state_dict(best_model)
 
-        test_results={'loss':[], 'acc':[]}
+        test_results={'loss':[], 'acc':[],'f1':[]}
         test_loss, test_accuracy = self.validate(self.test_dataloader, loss_fn, self.device)
+        test_f1=self.f1_score(outputs.logits, labels)
+
         test_results['loss'].append(test_loss)
         test_results['acc'].append(test_accuracy)
-        print(f'Test Loss: {test_loss}, Test Accuracy: {test_accuracy}')
+        test_results['f1'].append(test_f1)
+        print(f'Test Loss: {test_loss}, Test Accuracy: {test_accuracy}, Test F1: {test_f1}')
         
         self.train_history=train_history
         self.val_history=val_history
