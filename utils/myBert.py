@@ -9,12 +9,14 @@ import matplotlib.pyplot as plt
 import os
 import csv
 from tqdm import tqdm
+
 def multilabel_accuracy(preds, labels, threshold=0.5):
     preds = torch.sigmoid(preds)
     preds = (preds > threshold).float()
     correct = (preds == labels).float()
     acc = correct.sum() / correct.numel()
     return acc
+
 class myBert():
     def __init__(self,train_dataloader, validation_dataloader, test_dataloader):
         
@@ -30,7 +32,7 @@ class myBert():
         self.test_results=None
         self.hyperparameters=None
 
-        print("test")
+        # print("test")
 
     def validate(self,dataloader, loss_fn, device):
         self.model.eval()
@@ -50,17 +52,25 @@ class myBert():
         avg_loss = total_loss / len(dataloader)
         avg_acc = total_accuracy / len(dataloader)
         return avg_loss, avg_acc
-    def f1_score(self,preds, labels, threshold=0.5):
-        preds = torch.sigmoid(preds)
-        preds = (preds > threshold).float()
-        tp = (preds * labels).sum().to(torch.float32)
-        tn = ((1 - preds) * (1 - labels)).sum().to(torch.float32)
-        fp = (preds * (1 - labels)).sum().to(torch.float32)
-        fn = ((1 - preds) * labels).sum().to(torch.float32)
-        epsilon = 1e-7
-        precision = tp / (tp + fp + epsilon)
-        recall = tp / (tp + fn + epsilon)
-        f1 = 2* (precision*recall) / (precision + recall + epsilon)
+    def f1_score(self,dataloader, threshold=0.5):
+        self.model.eval()
+        f1=0
+        for batch in dataloader:
+            inputs, attention_masks, labels = batch[0].to(self.device), batch[1].to(self.device), batch[2].to(self.device)
+            with torch.no_grad():
+                outputs = self.model(input_ids=inputs, attention_mask=attention_masks)
+                preds = outputs.logits
+                preds = torch.sigmoid(preds)
+                preds = (preds > threshold).float()
+                tp = (preds * labels).sum().to(torch.float32)
+                tn = ((1 - preds) * (1 - labels)).sum().to(torch.float32)
+                fp = (preds * (1 - labels)).sum().to(torch.float32)
+                fn = ((1 - preds) * labels).sum().to(torch.float32)
+                epsilon = 1e-7
+                precision = tp / (tp + fp + epsilon)
+                recall = tp / (tp + fn + epsilon)
+                f1 += 2* (precision*recall) / (precision + recall + epsilon)
+        f1=f1/len(dataloader)
         return f1
     
     def train(self,epochs=20, lr=2e-5, freeze=0,early_stopping=5,decay=1,restore_best_weights=True):
@@ -73,7 +83,17 @@ class myBert():
         if freeze != 0:
             #freeze bert layers
             for i in range(freeze):
-                self.model.bert.encoder.layer[i].requires_grad = False
+                for param in self.model.bert.encoder.layer[i].parameters():
+                    param.requires_grad = False
+            #freeze embedding layer
+            for i, param in enumerate(self.model.parameters()):
+                if i < 5:
+                    param.requires_grad = False
+                else:
+                    break
+            # for name, param in self.model.named_parameters():
+            #     if param.requires_grad:
+            #         print (name)
 
         optimizer = AdamW(self.model.parameters(), lr=lr, eps=1e-8)
         steps_per_epoch = len(self.train_dataloader)
@@ -129,7 +149,8 @@ class myBert():
 
         test_results={'loss':[], 'acc':[],'f1':[]}
         test_loss, test_accuracy = self.validate(self.test_dataloader, loss_fn, self.device)
-        test_f1=self.f1_score(outputs.logits, labels)
+        test_predic=self.model()
+        test_f1=self.f1_score(self.test_dataloader)
 
         test_results['loss'].append(test_loss)
         test_results['acc'].append(test_accuracy)
@@ -151,7 +172,7 @@ class myBert():
         with open(file_name,  mode='a', newline='') as f:
             csv_writer = csv.writer(f)
             if f.tell() == 0:
-                csv_writer.writerow(['epoch','lr','early stop','freeze','decay rate','train time','best train loss','best train acc','best val loss','best val acc','test loss','test acc'])
+                csv_writer.writerow(['epoch','lr','early stop','freeze','decay rate','train time','best train loss','best train acc','best val loss','best val acc','test loss','test acc','test f1'])
             csv_writer.writerow([self.hyperparameters['epochs'],
                                 self.hyperparameters['lr'],
                                 self.hyperparameters['early_stopping'],
@@ -163,7 +184,8 @@ class myBert():
                                 min(self.val_history['loss']),
                                 max(self.val_history['acc']),
                                 self.test_results['loss'][-1],
-                                self.test_results['acc'][-1]])
+                                self.test_results['acc'][-1],
+                                self.test_results['f1'][-1]])
         
         self.plt(save_path=save_path,save=True)
         print("results saved")
@@ -184,7 +206,7 @@ class myBert():
         plt.plot(self.val_history['acc'], label='val_acc')
         plt.title('Accuracy w.r.t. Epoch')
         plt.xlabel('Epoch')
-        plt.ylabel('Loss')  
+        plt.ylabel('Accuracy')  
         plt.legend()
         learning_rate = self.hyperparameters['lr']
         freeze = self.hyperparameters['freeze']
